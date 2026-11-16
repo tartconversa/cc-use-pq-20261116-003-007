@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import uuid
+from .accountability import Accountability
 from .analytics import Analytics, days_between
 from .errors import require
 from .store import Store, now
@@ -12,6 +13,7 @@ class Publication:
     def __init__(self, store: Store):
         self.store = store
         self.analytics = Analytics(store)
+        self.accountability = Accountability(store)
 
     @staticmethod
     def head(db, market: str) -> int:
@@ -28,11 +30,14 @@ class Publication:
             revision = self.store.revision(db)
             candidate_id = uuid.uuid4().hex
             rows = self.analytics.calculate(db, market, from_day, to_day)
+            accountability_rows = self.accountability.calculate(db, market, from_day, to_day)
             db.execute("INSERT INTO candidates VALUES(?,?,?,?,?,?,?,?)", (candidate_id, market, from_day, to_day, revision, head, "prepared", now()))
             for row in rows:
                 db.execute("INSERT INTO candidate_rows VALUES(?,?,?,?)", (candidate_id, row["day"], row["product"], json.dumps(row, sort_keys=True)))
-            self.store.audit(db, "candidate_prepared", candidate_id, {"source_revision": revision, "expected_head": head, "rows": len(rows)})
-            return {"id": candidate_id, "market": market, "source_revision": revision, "expected_head": head, "rows": len(rows), "status": "prepared"}
+            for row in accountability_rows:
+                db.execute("INSERT INTO candidate_accountability VALUES(?,?,?,?,?)", (candidate_id, row["day"], row["product"], row["provider"] or "", json.dumps(row, sort_keys=True)))
+            self.store.audit(db, "candidate_prepared", candidate_id, {"source_revision": revision, "expected_head": head, "rows": len(rows), "accountability_rows": len(accountability_rows)})
+            return {"id": candidate_id, "market": market, "source_revision": revision, "expected_head": head, "rows": len(rows), "accountability_rows": len(accountability_rows), "status": "prepared"}
 
     def candidate(self, candidate_id: str) -> dict:
         with self.store.read() as db:
@@ -66,6 +71,7 @@ class Publication:
             market = candidate["market"]
             db.execute("INSERT INTO publications VALUES(?,?,?,?,?)", (market, version, candidate_id, expected_source_revision, now()))
             db.execute("INSERT INTO publication_rows(market,version,day,product,payload) SELECT ?,?,day,product,payload FROM candidate_rows WHERE candidate_id=?", (market, version, candidate_id))
+            db.execute("INSERT INTO publication_accountability(market,version,day,product,provider,payload) SELECT ?,?,day,product,provider,payload FROM candidate_accountability WHERE candidate_id=?", (market, version, candidate_id))
             db.execute("INSERT INTO publication_heads(market,version) VALUES(?,?) ON CONFLICT(market) DO UPDATE SET version=excluded.version", (market, version))
             db.execute("UPDATE candidates SET status='published' WHERE id=?", (candidate_id,))
             self.store.audit(db, "published", market, {"version": version, "candidate": candidate_id, "source_revision": expected_source_revision})
@@ -77,6 +83,25 @@ class Publication:
             require(meta is not None, "unknown_publication", "publication unknown", 404)
             rows = db.execute("SELECT payload FROM publication_rows WHERE market=? AND version=? ORDER BY day,product", (market, version)).fetchall()
             return {**dict(meta), "rows": [json.loads(r[0]) for r in rows]}
+
+    def read_accountability(self, market: str, version: int, product: str | None = None, provider: str | None = None) -> dict:
+        with self.store.read() as db:
+            meta = db.execute("SELECT * FROM publications WHERE market=? AND version=?", (market, version)).fetchone()
+            require(meta is not None, "unknown_publication", "publication unknown", 404)
+            query = "SELECT payload FROM publication_accountability WHERE market=? AND version=?"
+            params: list = [market, version]
+            if product is not None:
+                query += " AND product=?"
+                params.append(product)
+            if provider is not None:
+                query += " AND provider=?"
+                params.append(provider)
+            query += " ORDER BY day,product,provider"
+            rows = [json.loads(r[0]) for r in db.execute(query, params).fetchall()]
+            for row in rows:
+                if row.get("provider") == "":
+                    row["provider"] = None
+            return {"market": market, "version": version, "source_revision": meta["source_revision"], "rows": rows}
 
     def versions(self, market: str) -> list[dict]:
         with self.store.read() as db:

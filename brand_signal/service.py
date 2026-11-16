@@ -64,7 +64,11 @@ class Service:
             row = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
             require(row is not None, "unknown_ticket", "ticket unknown", 404)
             history = db.execute("SELECT * FROM ticket_history WHERE ticket_id=? ORDER BY revision", (ticket_id,)).fetchall()
-            return {**dict(row), "history": [dict(item) for item in history]}
+            reassignments = db.execute("SELECT id,event_at,from_provider,to_provider,reason,ticket_revision,created_at FROM ticket_reassignments WHERE ticket_id=? ORDER BY event_at,id", (ticket_id,)).fetchall()
+            from .providers import Providers
+            device = Catalog.device(db, row["device_id"])
+            responsibility = Providers._timeline(db, device["market"], device["product"], row)
+            return {**dict(row), "history": [dict(item) for item in history], "reassignments": [dict(item) for item in reassignments], "responsibility": responsibility}
 
     def list_for_device(self, device_id: str) -> list[dict]:
         with self.store.read() as db:

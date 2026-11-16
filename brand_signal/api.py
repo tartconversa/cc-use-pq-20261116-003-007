@@ -24,6 +24,8 @@ from .lineage import Lineage
 from .rollups import Rollups
 from .sampling import Sampling
 from .mappings import Mappings
+from .providers import Providers
+from .accountability import Accountability
 
 
 class MarketIn(BaseModel):
@@ -142,6 +144,38 @@ class MappingIn(BaseModel):
     valid_to: str | None = None
 
 
+class ProviderIn(BaseModel):
+    code: str
+    name: str
+
+
+class ResponsibilityIn(BaseModel):
+    market: str
+    product: str | None = None
+    provider: str
+    valid_from: str
+    valid_to: str | None = None
+    expected_latest: int
+
+
+class CloseResponsibilityIn(BaseModel):
+    valid_to: str
+    expected_revision: int
+
+
+class ReassignmentIn(BaseModel):
+    event_at: str
+    from_provider: str
+    to_provider: str
+    reason: str = ""
+    expected_revision: int
+
+
+class ReassignmentBatchIn(BaseModel):
+    request_key: str
+    rows: list[dict]
+
+
 def create_app(path: str | None = None) -> FastAPI:
     db = Store(path or os.environ.get("BRAND_SIGNAL_DB", "/tmp/brand-signal.sqlite3"))
     catalog = Catalog(db)
@@ -163,6 +197,8 @@ def create_app(path: str | None = None) -> FastAPI:
     rollups = Rollups(db)
     sampling = Sampling(db)
     mappings = Mappings(db)
+    providers = Providers(db)
+    accountability = Accountability(db)
     app = FastAPI(title="Brand Signal Service Analytics", version="1.0")
     app.state.store = db
 
@@ -399,6 +435,46 @@ def create_app(path: str | None = None) -> FastAPI:
     @app.get("/mappings/{source}")
     def list_mappings(source: str, external_id: str | None = None):
         return mappings.list(source, external_id)
+
+    @app.post("/providers")
+    def register_provider(body: ProviderIn):
+        return providers.register_provider(body.code, body.name)
+
+    @app.get("/providers")
+    def list_providers():
+        return providers.list_providers()
+
+    @app.post("/responsibilities")
+    def add_responsibility(body: ResponsibilityIn):
+        return providers.add_responsibility(body.market, body.product, body.provider, body.valid_from, body.valid_to, body.expected_latest)
+
+    @app.get("/responsibilities/{market}")
+    def list_responsibilities(market: str, product: str | None = None):
+        return providers.list_responsibilities(market, product)
+
+    @app.post("/responsibilities/{responsibility_id}/close")
+    def close_responsibility(responsibility_id: str, body: CloseResponsibilityIn):
+        return providers.close_responsibility(responsibility_id, body.valid_to, body.expected_revision)
+
+    @app.post("/tickets/{ticket_id}/reassignments")
+    def reassign(ticket_id: str, body: ReassignmentIn):
+        return providers.reassign(ticket_id, body.event_at, body.from_provider, body.to_provider, body.reason, body.expected_revision)
+
+    @app.post("/reassignments")
+    def reassignment_batch(body: ReassignmentBatchIn):
+        return providers.submit_reassignments(body.request_key, body.rows)
+
+    @app.get("/tickets/{ticket_id}/responsibility")
+    def ticket_responsibility(ticket_id: str):
+        return providers.timeline(ticket_id)
+
+    @app.get("/accountability/{market}")
+    def live_accountability(market: str, from_day: str, to_day: str):
+        return accountability.live(market, from_day, to_day)
+
+    @app.get("/publications/{market}/{version}/accountability")
+    def published_accountability(market: str, version: int, product: str | None = None, provider: str | None = None):
+        return publication.read_accountability(market, version, product, provider)
 
     return app
 

@@ -35,10 +35,17 @@ CREATE TABLE IF NOT EXISTS investigations(id TEXT PRIMARY KEY, market TEXT NOT N
 CREATE TABLE IF NOT EXISTS investigation_history(investigation_id TEXT NOT NULL REFERENCES investigations(id), revision INTEGER NOT NULL, action TEXT NOT NULL, at TEXT NOT NULL, owner TEXT NOT NULL, note TEXT NOT NULL, PRIMARY KEY(investigation_id,revision));
 CREATE TABLE IF NOT EXISTS market_rollups(market TEXT NOT NULL, version INTEGER NOT NULL, day TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(market,version,day));
 CREATE TABLE IF NOT EXISTS source_mappings(source TEXT NOT NULL, external_id TEXT NOT NULL, device_id TEXT NOT NULL REFERENCES devices(id), valid_from TEXT NOT NULL, valid_to TEXT, PRIMARY KEY(source,external_id,valid_from));
+CREATE TABLE IF NOT EXISTS providers(code TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS provider_responsibilities(id TEXT PRIMARY KEY, market TEXT NOT NULL REFERENCES markets(code), product TEXT, provider_code TEXT NOT NULL REFERENCES providers(code), valid_from TEXT NOT NULL, valid_to TEXT, revision INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ticket_reassignments(id TEXT PRIMARY KEY, ticket_id TEXT NOT NULL REFERENCES tickets(id), event_at TEXT NOT NULL, from_provider TEXT NOT NULL REFERENCES providers(code), to_provider TEXT NOT NULL REFERENCES providers(code), reason TEXT NOT NULL, ticket_revision INTEGER NOT NULL, request_key TEXT, origin_batch TEXT, created_at TEXT NOT NULL, UNIQUE(ticket_id,event_at));
+CREATE TABLE IF NOT EXISTS candidate_accountability(candidate_id TEXT NOT NULL REFERENCES candidates(id), day TEXT NOT NULL, product TEXT NOT NULL, provider TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(candidate_id,day,product,provider));
+CREATE TABLE IF NOT EXISTS publication_accountability(market TEXT NOT NULL, version INTEGER NOT NULL, day TEXT NOT NULL, product TEXT NOT NULL, provider TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(market,version,day,product,provider));
 CREATE INDEX IF NOT EXISTS idx_devices_market ON devices(market,product);
 CREATE INDEX IF NOT EXISTS idx_tickets_device ON tickets(device_id,opened_at);
 CREATE INDEX IF NOT EXISTS idx_telemetry_device ON telemetry(device_id,observed_at);
 CREATE INDEX IF NOT EXISTS idx_audit_subject ON audit(subject,id);
+CREATE INDEX IF NOT EXISTS idx_responsibilities_scope ON provider_responsibilities(market,product,valid_from);
+CREATE INDEX IF NOT EXISTS idx_reassignments_ticket ON ticket_reassignments(ticket_id,event_at);
 """
 
 

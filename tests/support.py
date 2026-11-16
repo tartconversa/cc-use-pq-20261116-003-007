@@ -7,6 +7,8 @@ from brand_signal.service import Service
 from brand_signal.telemetry import Telemetry
 from brand_signal.analytics import Analytics
 from brand_signal.publication import Publication
+from brand_signal.providers import Providers
+from brand_signal.accountability import Accountability
 from brand_signal.store import Store
 
 
@@ -22,9 +24,18 @@ class Scenario(unittest.TestCase):
         self.telemetry = Telemetry(self.store)
         self.analytics = Analytics(self.store)
         self.publication = Publication(self.store)
+        self.providers = Providers(self.store)
+        self.accountability = Accountability(self.store)
         self.catalog.add_market("ES", "Europe/Madrid")
         self.catalog.add_product("dryer", "Synthetic Dryer")
         self.catalog.install("device-1", "ES", "dryer", "2026-10-01T00:00:00Z")
+
+    def seed_providers(self):
+        """注册两个服务商并建立 dryer 产品级责任 P-A，市场级兜底 P-B。"""
+        self.providers.register_provider("P-A", "Alpha")
+        self.providers.register_provider("P-B", "Beta")
+        self.providers.add_responsibility("ES", None, "P-B", "2026-10-01T00:00:00Z", None, 0)
+        return self.providers.add_responsibility("ES", "dryer", "P-A", "2026-10-01T00:00:00Z", None, 0)
 
     def ticket(self, key="event-1", identifier="ticket-1", at="2026-10-20T22:30:00Z", device="device-1", severity="normal"):
         return {"event_key": key, "id": identifier, "device_id": device, "opened_at": at, "severity": severity}
